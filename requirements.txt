@@ -1,0 +1,16 @@
+streamlit
+ultralytics
+opencv-python-headless
+pillow
+torch
+langchain
+langchain-community
+langchain-experimental
+langchain-huggingface
+langchain-neo4j
+langchain-groq
+langchain-core
+neo4j
+pydantic
+roboflow
+sympy<1.13
