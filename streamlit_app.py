@@ -91,15 +91,13 @@ def load_yolo():
 
 @st.cache_resource
 def load_neo4j():
-    url = st.secrets["NEO4J_URI"].strip()
-    username = st.secrets["NEO4J_USER"].strip()
-    password = st.secrets["NEO4J_PASSWORD"].strip()
+    url = st.secrets.get("NEO4J_URI", "").strip()
+    username = st.secrets.get("NEO4J_USER", "neo4j").strip()
+    password = st.secrets.get("NEO4J_PASSWORD", "").strip()
 
-    # Diagnóstico de Secrets (no imprime la contraseña por seguridad)
-    st.write("🔍 **Diagnóstico de Conexión Neo4j:**")
-    st.write(f"- **URI en Secrets:** `{st.secrets.get('NEO4J_URI')}`")
-    st.write(f"- **Usuario en Secrets:** `{st.secrets.get('NEO4J_USER')}`")
-    st.write(f"- **¿Contraseña presente?:** `{'Sí' if 'NEO4J_PASSWORD' in st.secrets else 'No'}`")
+    if not url or not password:
+        st.error("⚠️ Faltan las credenciales de Neo4j en los Secrets de Streamlit.")
+        st.stop()
 
     return Neo4jGraph(
         url=url,
