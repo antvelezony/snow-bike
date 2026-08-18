@@ -66,6 +66,7 @@ class AnalisisEnsambleSchema(BaseModel):
         )
     )
     es_ensamble_valido: bool = Field(
+        default=False,
         description=(
             "True si 'ListoParaEnsamblar' en el grafo es true o si la combinación"
             " de piezas es válida."
