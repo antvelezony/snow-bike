@@ -118,7 +118,7 @@ def load_neo4j():
 @st.cache_resource
 def load_llm():
     return ChatGroq(
-        model="groq/compound-mini",
+        model="qwen/qwen3.6-27b",
         temperature=0,
         api_key=st.secrets.get("GROQ_API_KEY", "").strip()
     )
