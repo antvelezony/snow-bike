@@ -95,6 +95,11 @@ def load_neo4j():
     username = st.secrets.get("NEO4J_USER", "neo4j").strip()
     password = st.secrets.get("NEO4J_PASSWORD", "").strip()
 
+    st.write("🔍 **Diagnóstico de Conexión Neo4j:**")
+    st.write(f"- **URI en Secrets:** `{url}`")
+    st.write(f"- **Usuario en Secrets:** `{username}`")
+    st.write(f"- **¿Contraseña presente?:** `{'Sí' if password else 'No'}`")
+
     if not url or not password:
         st.error("⚠️ Faltan las credenciales de Neo4j en los Secrets de Streamlit.")
         st.stop()
