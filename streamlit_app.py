@@ -18,7 +18,6 @@ from langchain_neo4j import Neo4jGraph
 # Librerías de LangChain y Neo4j
 from langchain_core.prompts import PromptTemplate
 from langchain_neo4j import Neo4jGraph
-from langchain_ollama import ChatOllama
 
 # ==========================================
 # RUTA DE GIFS Y CONFIGURACIÓN DE UMBRALES
