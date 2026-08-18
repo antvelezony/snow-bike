@@ -84,12 +84,6 @@ class AnalisisEnsambleSchema(BaseModel):
 # ==========================================
 st.set_page_config(page_title="Evaluador de Ensambles Snow Bike", layout="wide")
 
-# Obtener credenciales desde los Secrets de Streamlit
-NEO4J_URL = st.secrets.get("NEO4J_URI", "bolt://localhost:7687")
-NEO4J_USER = st.secrets.get("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = st.secrets.get("NEO4J_PASSWORD", "password")
-
-
 @st.cache_resource
 def load_yolo():
     return YOLO("best.pt")
@@ -100,6 +94,12 @@ def load_neo4j():
     url = st.secrets["NEO4J_URI"].strip()
     username = st.secrets["NEO4J_USER"].strip()
     password = st.secrets["NEO4J_PASSWORD"].strip()
+
+    # Diagnóstico de Secrets (no imprime la contraseña por seguridad)
+    st.write("🔍 **Diagnóstico de Conexión Neo4j:**")
+    st.write(f"- **URI en Secrets:** `{st.secrets.get('NEO4J_URI')}`")
+    st.write(f"- **Usuario en Secrets:** `{st.secrets.get('NEO4J_USER')}`")
+    st.write(f"- **¿Contraseña presente?:** `{'Sí' if 'NEO4J_PASSWORD' in st.secrets else 'No'}`")
 
     return Neo4jGraph(
         url=url,
