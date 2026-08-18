@@ -111,7 +111,7 @@ def load_llm():
     return ChatGroq(
         model="llama-3.1-8b-instant",
         temperature=0,
-        api_key=st.secrets.get("GROQ_API_KEY"),
+        api_key=st.secrets["GROQ_API_KEY"]
     )
 
 
