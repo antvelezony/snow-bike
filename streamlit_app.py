@@ -96,11 +96,11 @@ def load_neo4j():
     password = st.secrets.get("NEO4J_PASSWORD", "").strip()
     database = st.secrets.get("NEO4J_DATABASE", "").strip()
 
-    st.write("🔍 **Diagnóstico de Conexión Neo4j:**")
-    st.write(f"- **URI en Secrets:** `{url}`")
-    st.write(f"- **Usuario en Secrets:** `{username}`")
-    st.write(f"- **Base de datos:** `{database}`")
-    st.write(f"- **¿Contraseña presente?:** `{'Sí' if password else 'No'}`")
+    #st.write("🔍 **Diagnóstico de Conexión Neo4j:**")
+    #st.write(f"- **URI en Secrets:** `{url}`")
+    #st.write(f"- **Usuario en Secrets:** `{username}`")
+    #st.write(f"- **Base de datos:** `{database}`")
+    #st.write(f"- **¿Contraseña presente?:** `{'Sí' if password else 'No'}`")
 
     if not url or not password:
         st.error("⚠️ Faltan las credenciales de Neo4j en los Secrets de Streamlit.")
@@ -118,7 +118,7 @@ def load_neo4j():
 @st.cache_resource
 def load_llm():
     return ChatGroq(
-        model="llama-3.1-8b-instant",
+        model="groq/compound-mini",
         temperature=0,
         api_key=st.secrets["GROQ_API_KEY"]
     )
