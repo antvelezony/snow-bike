@@ -92,7 +92,7 @@ def load_yolo():
 @st.cache_resource
 def load_neo4j():
     url = st.secrets.get("NEO4J_URI", "").strip()
-    username = st.secrets.get("NEO4J_USER", "neo4j").strip()
+    username = st.secrets.get("NEO4J_USER", "").strip()
     password = st.secrets.get("NEO4J_PASSWORD", "").strip()
 
     st.write("🔍 **Diagnóstico de Conexión Neo4j:**")
