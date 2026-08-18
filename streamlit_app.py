@@ -94,10 +94,12 @@ def load_neo4j():
     url = st.secrets.get("NEO4J_URI", "").strip()
     username = st.secrets.get("NEO4J_USER", "").strip()
     password = st.secrets.get("NEO4J_PASSWORD", "").strip()
+    database = st.secrets.get("NEO4J_DATABASE", "").strip()
 
     st.write("🔍 **Diagnóstico de Conexión Neo4j:**")
     st.write(f"- **URI en Secrets:** `{url}`")
     st.write(f"- **Usuario en Secrets:** `{username}`")
+    st.write(f"- **Base de datos:** `{database}`")
     st.write(f"- **¿Contraseña presente?:** `{'Sí' if password else 'No'}`")
 
     if not url or not password:
@@ -108,6 +110,7 @@ def load_neo4j():
         url=url,
         username=username,
         password=password,
+        database=database,
         refresh_schema=False,
     )
 
