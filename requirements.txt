@@ -1,5 +1,6 @@
 streamlit
 ultralytics
+--no-binary opencv-python
 opencv-python-headless
 pillow
 torch
