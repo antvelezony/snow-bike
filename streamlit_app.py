@@ -97,10 +97,14 @@ def load_yolo():
 
 @st.cache_resource
 def load_neo4j():
+    url = st.secrets["NEO4J_URI"].strip()
+    username = st.secrets["NEO4J_USER"].strip()
+    password = st.secrets["NEO4J_PASSWORD"].strip()
+
     return Neo4jGraph(
-        url=NEO4J_URL,
-        username=NEO4J_USER,
-        password=NEO4J_PASSWORD,
+        url=url,
+        username=username,
+        password=password,
         refresh_schema=False,
     )
 
