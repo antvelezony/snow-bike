@@ -271,7 +271,10 @@ Reglas estrictas para generar la respuesta:
         template=template_str,
     )
 
-    structured_llm = llm.with_structured_output(AnalisisEnsambleSchema)
+    structured_llm = llm.with_structured_output(
+        AnalisisEnsambleSchema,
+        method="json_mode"
+    )
     chain = prompt_template | structured_llm
 
     response = chain.invoke(
