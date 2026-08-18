@@ -120,7 +120,7 @@ def load_llm():
     return ChatGroq(
         model="groq/compound-mini",
         temperature=0,
-        api_key=st.secrets["GROQ_API_KEY"]
+        api_key=st.secrets.get("GROQ_API_KEY", "").strip()
     )
 
 
