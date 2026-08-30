@@ -10,6 +10,7 @@ langchain-huggingface
 langchain-neo4j
 langchain-groq
 langchain-core
+langchain-ollama
 neo4j
 pydantic
 roboflow
