@@ -12,7 +12,8 @@ from ultralytics import YOLO
 
 import os
 import streamlit as st
-from langchain_groq import ChatGroq
+#from langchain_groq import ChatGroq
+from langchain_ollama import ChatOllama
 from langchain_neo4j import Neo4jGraph
 
 # Librerías de LangChain y Neo4j
@@ -117,11 +118,19 @@ def load_neo4j():
 
 
 @st.cache_resource
-def load_llm():
-    return ChatGroq(
-        model="qwen/qwen3.6-27b",
-        temperature=0,
-        api_key=st.secrets.get("GROQ_API_KEY", "").strip()
+def load_ollama():
+    ollama_url = st.secrets.get("OLLAMA_BASE_URL", "").strip()
+    model_name = st.secrets.get("OLLAMA_MODEL", "").strip()
+
+    return ChatOllama(
+        base_url=ollama_url,
+        model=model_name,
+        temperature=0.2,
+        client_kwargs={
+            "headers": {
+                "ngrok-skip-browser-warning": "true"
+            }
+        }
     )
 
 
@@ -338,7 +347,7 @@ def main():
         ):
             model = load_yolo()
             graph = load_neo4j()
-            llm = load_llm()
+            llm = load_ollama()
 
             image = Image.open(uploaded_file)
             output_json, annotated_image = run_inference(model, image)
