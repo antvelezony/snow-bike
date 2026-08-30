@@ -12,7 +12,6 @@ from ultralytics import YOLO
 
 import os
 import streamlit as st
-#from langchain_groq import ChatGroq
 from langchain_ollama import ChatOllama
 from langchain_neo4j import Neo4jGraph
 
@@ -128,7 +127,8 @@ def load_ollama():
         temperature=0.2,
         client_kwargs={
             "headers": {
-                "ngrok-skip-browser-warning": "true"
+                "ngrok-skip-browser-warning": "true",
+                "User-Agent": "StreamlitCloudApp"
             }
         }
     )
@@ -281,10 +281,7 @@ Reglas estrictas para generar la respuesta:
         template=template_str,
     )
 
-    structured_llm = llm.with_structured_output(
-        AnalisisEnsambleSchema,
-        method="json_mode"
-    )
+    structured_llm = llm.with_structured_output(AnalisisEnsambleSchema)
     chain = prompt_template | structured_llm
 
     response = chain.invoke(
