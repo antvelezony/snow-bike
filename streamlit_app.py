@@ -329,7 +329,7 @@ def main():
         with st.spinner("Analizando piezas y consultando el proceso de ensamble..."):
             model = load_yolo()
             graph = load_neo4j()
-            llm = load_llm()
+            llm = load_ollama()
 
             image = Image.open(active_image_source)
             output_json, annotated_image = run_inference(model, image)
