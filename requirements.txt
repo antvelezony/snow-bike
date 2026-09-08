@@ -15,5 +15,3 @@ neo4j
 pydantic
 roboflow
 sympy<1.13
-libgl1
-libglib2.0-bin
