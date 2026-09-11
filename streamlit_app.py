@@ -11,6 +11,9 @@ from langchain_core.prompts import PromptTemplate
 from langchain_neo4j import Neo4jGraph
 from langchain_ollama import ChatOllama
 
+from datetime import datetime
+import requests
+
 # ==========================================
 # RUTA DE GIFS Y CONFIGURACIÓN DE UMBRALES
 # ==========================================
@@ -294,6 +297,8 @@ def render_survey_view():
         "Por favor, completa la siguiente encuesta para registrar los datos del experimento."
     )
 
+    ollama_url = st.secrets.get("OLLAMA_BASE_URL", "").strip()
+
     with st.form("encuesta_satisfaccion"):
         # SECCIÓN 1
         st.subheader("Sección 1: Carga Mental Percibida (NASA-TLX Simplificado)")
@@ -373,10 +378,61 @@ def render_survey_view():
         )
 
         if submitted:
-            st.session_state["encuesta_completada"] = True
-            st.success(
-                "✅ Respuestas guardadas con éxito. ¡Gracias por tu participación!"
-            )
+            # 1. Construir el objeto JSON completo
+            payload = {
+                "metadata": {
+                    "timestamp": datetime.now().isoformat(),
+                    "participante_id": st.session_state.get(
+                        "participante_id", "P_DESCONOCIDO"
+                    ),
+                    "grupo_asignado": st.session_state.get("grupo", "SIN_GRUPO"),
+                },
+                "nasa_tlx": {
+                    "exigencia_mental": q1,
+                    "frustracion": q2,
+                    "esfuerzo_fisico": q3,
+                },
+                "sus_adaptado": {
+                    "claridad_informacion": q4,
+                    "confianza": q5,
+                    "ritmo_trabajo": q6,
+                    "preferencia": q7,
+                },
+                "cualitativo": {
+                    "puntos_friccion": q8,
+                    "friccion_operativa": q9,
+                    "sugerencias_mejora": q10,
+                },
+            }
+
+            # 2. Enviar petición POST a través del túnel de Ngrok
+            endpoint = f"{ollama_url.rstrip('/')}/guardar_encuesta"
+
+            # Header para evitar la pantalla de advertencia intermitente de Ngrok
+            headers = {
+                "Content-Type": "application/json",
+                "ngrok-skip-browser-warning": "true",
+            }
+
+            try:
+                response = requests.post(
+                    endpoint, json=payload, headers=headers, timeout=10
+                )
+
+                if response.status_code == 200:
+                    st.session_state["encuesta_completada"] = True
+                    st.success(
+                        "✅ Respuestas guardadas correctamente en el servidor local. ¡Gracias por tu participación!"
+                    )
+                else:
+                    st.error(
+                        f"⚠️ Error al guardar en el servidor local (Código {response.status_code})."
+                    )
+
+            except requests.exceptions.RequestException as e:
+                st.error(
+                    f"❌ No se pudo conectar con el servidor local a través de Ngrok: {e}"
+                )
 
     if st.session_state.get("encuesta_completada"):
         if st.button("🔄 Iniciar Nuevo Experimento"):
