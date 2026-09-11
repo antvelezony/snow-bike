@@ -15,5 +15,3 @@ neo4j
 pydantic
 roboflow
 sympy<1.13
-st-gsheets-connection
-pandas
