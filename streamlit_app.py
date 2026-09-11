@@ -300,6 +300,17 @@ def render_survey_view():
     ollama_url = st.secrets.get("OLLAMA_BASE_URL", "").strip()
 
     with st.form("encuesta_satisfaccion"):
+        # ==========================================
+        # DATOS GENERALES DEL PARTICIPANTE (NUEVO)
+        # ==========================================
+        st.subheader("Información del Participante")
+        nombre_participante = st.text_input(
+            "Nombre completo o Identificador del participante:",
+            placeholder="Ej. Juan Pérez",
+        )
+
+        st.divider()
+
         # SECCIÓN 1
         st.subheader("Sección 1: Carga Mental Percibida (NASA-TLX Simplificado)")
         st.caption(
@@ -382,6 +393,7 @@ def render_survey_view():
             payload = {
                 "metadata": {
                     "timestamp": datetime.now().isoformat(),
+                    "nombre_participante": nombre_participante.strip(),
                     "participante_id": st.session_state.get(
                         "participante_id", "P_DESCONOCIDO"
                     ),
