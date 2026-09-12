@@ -44,7 +44,7 @@ class AnalisisEnsambleSchema(BaseModel):
     ensambles_posibles: List[str] = Field(
         description=(
             "Lista de IDs de ensambles objetivos que se PUEDEN FORMAR o completar con"
-            " los insumos detectados (ej: ['assembly_3']). Usar strictly el formato 'assembly_X'."
+            " los insumos detectados (ej: ['assembly_3']). Usar estrictamente el formato 'assembly_X'."
         )
     )
     etapa_actual: str = Field(
@@ -202,20 +202,29 @@ def run_inference(model, PIL_image):
 
 
 def get_assembly_sequence_from_neo4j(graph, detected_classes):
+    print("\n" + "=" * 60)
+    print("📌 [YOLO DETECTED CLASSES]:", detected_classes)
+    print("=" * 60)
+
+    # Consulta Cypher flexible: busca si la clase detectada es un componente O el ensamble mismo
     query = """
-    MATCH (target:Assembly)-[:REQUIRES]->(req)
-    WHERE req.id IN $classes OR req.name IN $classes
+    MATCH (target:Assembly)
+    WHERE target.id IN $classes 
+       OR EXISTS {
+            MATCH (target)-[:REQUIRES]->(req)
+            WHERE req.id IN $classes OR req.name IN $classes
+       }
     
-    MATCH (target)-[:REQUIRES]->(all_req)
+    OPTIONAL MATCH (target)-[:REQUIRES]->(all_req)
     OPTIONAL MATCH (target)-[:NEXT_STEP]->(next_step)
     
     WITH target, 
-         collect(DISTINCT req.id) AS componentes_presentes,
+         [r IN collect(DISTINCT all_req.id) WHERE r IN $classes] AS componentes_presentes,
          collect(DISTINCT all_req.id) AS componentes_totales,
          next_step.id AS siguiente_paso
          
     WITH target, componentes_presentes, componentes_totales, siguiente_paso,
-         (size(componentes_presentes) = size(componentes_totales)) AS listo
+         (target.id IN $classes OR size(componentes_presentes) = size(componentes_totales)) AS listo
          
     RETURN 
         target.id AS EnsambleObjetivo,
@@ -225,11 +234,10 @@ def get_assembly_sequence_from_neo4j(graph, detected_classes):
         [x IN componentes_totales WHERE NOT x IN $classes] AS ComponentesFaltantes,
         listo AS ListoParaEnsamblar,
         siguiente_paso AS SiguientePasoSiSeCompleta
-    ORDER BY ListoParaEnsamblar DESC, target.id ASC
+    ORDER BY ListoParaEnsamblar DESC, target.id DESC
     """
     results = graph.query(query, params={"classes": detected_classes})
 
-    print("\n" + "=" * 60)
     print("🔍 [LOG NEO4J] SECUENCIA Y RELACIONES EXTRAÍDAS DEL GRAFO")
     print("=" * 60)
     if results:
@@ -547,32 +555,27 @@ def main():
         analysis: Optional[AnalisisEnsambleSchema] = data.get("analysis")
         valid_classes: List[str] = data.get("valid_classes", [])
 
-        if analysis:
+        # CASO VÍAS DIRECTAS: Si la imagen detectada por YOLO contiene "assembly_7"
+        if "assembly_7" in valid_classes:
+            st.success("🎉 **¡Ensamble Final (Ensamble 7) Completado Exitosamente!**")
+            st.markdown("Has completado la totalidad de la estructura de la Snow Bike.")
+            st.divider()
+            if st.button("Finalizar Ensamble e Ir a Encuesta ➔", type="primary"):
+                st.session_state["mostrar_encuesta"] = True
+                st.rerun()
+
+        elif analysis:
             target_raw = (
                 analysis.ensambles_posibles[0]
                 if analysis.ensambles_posibles
                 else analysis.etapa_actual
             )
 
-            # SÓLO es el final absoluto si la imagen detectada es directamente assembly_7
-            is_final_assembly_detected = "assembly_7" in valid_classes
-
             display_target = get_assembly_display_name(target_raw)
             display_stage = get_assembly_display_name(analysis.etapa_actual)
 
-            # CASO A: Se capturó una foto directa del Ensamble 7 Ya Terminado
-            if is_final_assembly_detected:
-                st.success("🎉 **¡Ensamble Final (Ensamble 7) Completado Exitosamente!**")
-                st.markdown(
-                    "Has completado la totalidad de la estructura de la Snow Bike."
-                )
-                st.divider()
-                if st.button("Finalizar Ensamble e Ir a Encuesta ➔", type="primary"):
-                    st.session_state["mostrar_encuesta"] = True
-                    st.rerun()
-
-            # CASO B: Ensamble Válido en progreso (incluyendo cuando detecta assembly_6 + seat para formar assembly_7)
-            elif analysis.es_ensamble_valido and not analysis.piezas_faltantes:
+            # CASO A: Ensamble Válido en progreso
+            if analysis.es_ensamble_valido and not analysis.piezas_faltantes:
                 st.success(f"✅ **Siguiente Ensamble Listo:** `{display_stage}`")
                 st.markdown(f"**Instrucción del Proceso:**\n{analysis.resumen_tecnico}")
 
@@ -583,7 +586,7 @@ def main():
                 if st.button("Continuar ➔", type="primary"):
                     resetear_proceso()
 
-            # CASO C: Ensamble Incompleto / Faltan Piezas
+            # CASO B: Ensamble Incompleto / Faltan Piezas
             else:
                 st.error("⚠️ **No es posible realizar un nuevo ensamble aún.**")
 
@@ -599,7 +602,7 @@ def main():
                     resetear_proceso()
         else:
             st.warning(
-                "⚠️ No se identificaron piezas suficientes o válidas para sugerir un ensamble."
+                f"⚠️ No se identificaron reglas en Neo4j para las piezas detectadas: `{valid_classes}`"
             )
             st.divider()
             if st.button("🔄 Volver a intentar", type="secondary"):
