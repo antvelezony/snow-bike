@@ -209,12 +209,11 @@ def run_inference(model, PIL_image):
 
 
 def get_assembly_sequence_from_neo4j(graph, detected_classes):
-    # Consulta ajustada para contemplar tanto requerimientos directos como ensambles finales (ej. assembly_7)
+    # Consulta corregida sin variables introducidas dentro de expresiones de patrón en WHERE
     query = """
     MATCH (target:Assembly)
-    WHERE (target)-[:REQUIRES]->(req) AND (req.id IN $classes OR req.name IN $classes)
-       OR target.id IN $classes
-       OR target.name IN $classes
+    OPTIONAL MATCH (target)-[:REQUIRES]->(req)
+    WHERE req.id IN $classes OR req.name IN $classes OR target.id IN $classes OR target.name IN $classes
     
     OPTIONAL MATCH (target)-[:REQUIRES]->(all_req)
     OPTIONAL MATCH (target)-[:NEXT_STEP]->(next_step)
