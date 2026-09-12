@@ -545,6 +545,7 @@ def main():
     if data:
         st.divider()
         analysis: Optional[AnalisisEnsambleSchema] = data.get("analysis")
+        valid_classes: List[str] = data.get("valid_classes", [])
 
         if analysis:
             target_raw = (
@@ -553,10 +554,11 @@ def main():
                 else analysis.etapa_actual
             )
 
-            # Extraer ID y verificar si corresponde a Ensamble 7
             extracted_target_id = extract_assembly_id(target_raw)
             extracted_stage_id = extract_assembly_id(analysis.etapa_actual)
 
+            # Para ser Ensamble 7 FINAL, se debe haber ensamblado exitosamente el ensamble 7
+            # (es decir, que el ensamble objetivo/etapa alcanzado ya sea assembly_7 o esté detectado)
             is_final_assembly = (
                 extracted_target_id == "assembly_7"
                 or extracted_stage_id == "assembly_7"
@@ -566,26 +568,28 @@ def main():
             display_target = get_assembly_display_name(target_raw)
             display_stage = get_assembly_display_name(analysis.etapa_actual)
 
-            # CASO A: Ensamble Válido
+            # CASO A: Ensamble Válido y Completo
             if analysis.es_ensamble_valido and not analysis.piezas_faltantes:
-                st.success(f"✅ **Siguiente Ensamble Listo:** `{display_stage}`")
-                st.markdown(f"**Instrucción del Proceso:**\n{analysis.resumen_tecnico}")
-
-                st.subheader("🎬 Tutorial de Ensamble")
-                render_assembly_gif(target_raw, caption=f"Paso a paso: {display_target}")
-
-                st.divider()
+                # Si el ensamble recién completado es el 7 (final)
                 if is_final_assembly:
-                    if st.button(
-                        "Finalizar Ensamble e Ir a Encuesta ➔", type="primary"
-                    ):
+                    st.success("🎉 **¡Has alcanzado el Ensamble Final (Ensamble 7)!**")
+                    st.markdown(f"**Instrucción del Proceso:**\n{analysis.resumen_tecnico}")
+                    st.divider()
+                    if st.button("Finalizar Ensamble e Ir a Encuesta ➔", type="primary"):
                         st.session_state["mostrar_encuesta"] = True
                         st.rerun()
                 else:
+                    st.success(f"✅ **Siguiente Ensamble Listo:** `{display_stage}`")
+                    st.markdown(f"**Instrucción del Proceso:**\n{analysis.resumen_tecnico}")
+
+                    st.subheader("🎬 Tutorial de Ensamble")
+                    render_assembly_gif(target_raw, caption=f"Paso a paso: {display_target}")
+
+                    st.divider()
                     if st.button("Continuar ➔", type="primary"):
                         resetear_proceso()
 
-            # CASO B: Ensamble Incompleto / Faltan Piezas
+            # CASO B: Ensamble Incompleto / Faltan Piezas (ej. Ensamble 6 + Seat que forma Ensamble 7 incompletamente si le falta algo)
             else:
                 st.error("⚠️ **No es posible realizar un nuevo ensamble aún.**")
 
