@@ -44,7 +44,7 @@ class AnalisisEnsambleSchema(BaseModel):
     ensambles_posibles: List[str] = Field(
         description=(
             "Lista de IDs de ensambles objetivos que se PUEDEN FORMAR o completar con"
-            " los insumos detectados (ej: ['assembly_3']). Usar estrictamente el formato 'assembly_X'."
+            " los insumos detectados (ej: ['assembly_3']). Usar strictly el formato 'assembly_X'."
         )
     )
     etapa_actual: str = Field(
@@ -273,7 +273,7 @@ Reglas estrictas para generar la respuesta:
 2. 'ensambles_posibles': Debe contener únicamente las claves del 'EnsambleObjetivo' indicado en el JSON de Neo4j si 'ListoParaEnsamblar' es true (ejemplo estricto: ['assembly_3']).
 3. 'etapa_actual': Debe ser ÚNICAMENTE el identificador del 'EnsambleObjetivo' (ejemplo estricto: 'assembly_3'). NO agregues texto como "construcción exitosa...".
 4. 'piezas_faltantes': Usa exactamente la lista 'ComponentesFaltantes' de Neo4j para el ensamble seleccionado.
-5. 'resumen_tecnico': Explica cómo la combinación de las piezas detectadas permite formar el ensamble objetivo y qué paso sigue.
+5. 'resumen_tecnico': Explica cómo la combinación de las piezas detectadas permite formar el ensamble objetivo y cuál es el siguiente paso.
 """
 
     prompt_template = PromptTemplate(
@@ -554,42 +554,36 @@ def main():
                 else analysis.etapa_actual
             )
 
-            extracted_target_id = extract_assembly_id(target_raw)
-            extracted_stage_id = extract_assembly_id(analysis.etapa_actual)
-
-            # Para ser Ensamble 7 FINAL, se debe haber ensamblado exitosamente el ensamble 7
-            # (es decir, que el ensamble objetivo/etapa alcanzado ya sea assembly_7 o esté detectado)
-            is_final_assembly = (
-                extracted_target_id == "assembly_7"
-                or extracted_stage_id == "assembly_7"
-                or "assembly_7" in valid_classes
-            )
+            # SÓLO es el final absoluto si la imagen detectada es directamente assembly_7
+            is_final_assembly_detected = "assembly_7" in valid_classes
 
             display_target = get_assembly_display_name(target_raw)
             display_stage = get_assembly_display_name(analysis.etapa_actual)
 
-            # CASO A: Ensamble Válido y Completo
-            if analysis.es_ensamble_valido and not analysis.piezas_faltantes:
-                # Si el ensamble recién completado es el 7 (final)
-                if is_final_assembly:
-                    st.success("🎉 **¡Has alcanzado el Ensamble Final (Ensamble 7)!**")
-                    st.markdown(f"**Instrucción del Proceso:**\n{analysis.resumen_tecnico}")
-                    st.divider()
-                    if st.button("Finalizar Ensamble e Ir a Encuesta ➔", type="primary"):
-                        st.session_state["mostrar_encuesta"] = True
-                        st.rerun()
-                else:
-                    st.success(f"✅ **Siguiente Ensamble Listo:** `{display_stage}`")
-                    st.markdown(f"**Instrucción del Proceso:**\n{analysis.resumen_tecnico}")
+            # CASO A: Se capturó una foto directa del Ensamble 7 Ya Terminado
+            if is_final_assembly_detected:
+                st.success("🎉 **¡Ensamble Final (Ensamble 7) Completado Exitosamente!**")
+                st.markdown(
+                    "Has completado la totalidad de la estructura de la Snow Bike."
+                )
+                st.divider()
+                if st.button("Finalizar Ensamble e Ir a Encuesta ➔", type="primary"):
+                    st.session_state["mostrar_encuesta"] = True
+                    st.rerun()
 
-                    st.subheader("🎬 Tutorial de Ensamble")
-                    render_assembly_gif(target_raw, caption=f"Paso a paso: {display_target}")
+            # CASO B: Ensamble Válido en progreso (incluyendo cuando detecta assembly_6 + seat para formar assembly_7)
+            elif analysis.es_ensamble_valido and not analysis.piezas_faltantes:
+                st.success(f"✅ **Siguiente Ensamble Listo:** `{display_stage}`")
+                st.markdown(f"**Instrucción del Proceso:**\n{analysis.resumen_tecnico}")
 
-                    st.divider()
-                    if st.button("Continuar ➔", type="primary"):
-                        resetear_proceso()
+                st.subheader("🎬 Tutorial de Ensamble")
+                render_assembly_gif(target_raw, caption=f"Paso a paso: {display_target}")
 
-            # CASO B: Ensamble Incompleto / Faltan Piezas (ej. Ensamble 6 + Seat que forma Ensamble 7 incompletamente si le falta algo)
+                st.divider()
+                if st.button("Continuar ➔", type="primary"):
+                    resetear_proceso()
+
+            # CASO C: Ensamble Incompleto / Faltan Piezas
             else:
                 st.error("⚠️ **No es posible realizar un nuevo ensamble aún.**")
 
