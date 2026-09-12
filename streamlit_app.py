@@ -1,7 +1,7 @@
 from datetime import datetime
 import json
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import List, Optional
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -76,9 +76,7 @@ class AnalisisEnsambleSchema(BaseModel):
 # ==========================================
 # 1. CONFIGURACIÓN DE PÁGINA Y RECURSOS
 # ==========================================
-st.set_page_config(
-    page_title="Asistente de Ensamble Snow Bike", layout="centered"
-)
+st.set_page_config(page_title="Asistente de Ensamble Snow Bike", layout="centered")
 
 
 @st.cache_resource
@@ -94,9 +92,7 @@ def load_neo4j():
     database = st.secrets.get("NEO4J_DATABASE", "").strip()
 
     if not url or not password:
-        st.error(
-            "⚠️ Faltan las credenciales de Neo4j en los Secrets de Streamlit."
-        )
+        st.error("⚠️ Faltan las credenciales de Neo4j en los Secrets de Streamlit.")
         st.stop()
 
     return Neo4jGraph(
@@ -127,7 +123,7 @@ def load_ollama():
 
 
 # ==========================================
-# HELPERS PARA MANEJO DE GIFS Y FORMATO
+# HELPERS PARA MANEJO DE GIFS Y NOMBRES
 # ==========================================
 def extract_assembly_id(text: str) -> Optional[str]:
     """Extrae el identificador tipo 'assembly_X' de cualquier texto retornado."""
@@ -139,15 +135,13 @@ def extract_assembly_id(text: str) -> Optional[str]:
     return None
 
 
-def format_assembly_name(text: str) -> str:
-    """Convierte cadenas como 'assembly_3' a 'Ensamble 3' para mostrar en la UI."""
-    if not text:
-        return ""
-    assembly_id = extract_assembly_id(text)
+def get_assembly_display_name(raw_text: str) -> str:
+    """Transforma claves tipo 'assembly_7' a texto legible en español como 'Ensamble 7'."""
+    assembly_id = extract_assembly_id(raw_text)
     if assembly_id:
         num = assembly_id.split("_")[-1]
         return f"Ensamble {num}"
-    return text.replace("_", " ").capitalize()
+    return raw_text
 
 
 def render_assembly_gif(raw_text: str, caption: str = ""):
@@ -159,15 +153,14 @@ def render_assembly_gif(raw_text: str, caption: str = ""):
         if gif_path.exists():
             st.image(str(gif_path), caption=caption, use_container_width=True)
         else:
-            st.info(
-                f"ℹ️ No se encontró la guía animada para: `{format_assembly_name(assembly_id)}`"
-            )
+            display_name = get_assembly_display_name(assembly_id)
+            st.info(f"ℹ️ No se encontró la guía animada para: `{display_name}`")
     else:
         st.info("ℹ️ No se pudo extraer una clave válida de ensamble.")
 
 
 def resetear_proceso():
-    """Limpia la sesión e incrementa el contador para forzar reseteo del widget."""
+    """Limpia la sesión e incrementa el contador de clave para forzar el reseteo del widget de captura."""
     current_key_id = st.session_state.get("widget_key_id", 0)
     st.session_state.clear()
     st.session_state["widget_key_id"] = current_key_id + 1
@@ -175,7 +168,7 @@ def resetear_proceso():
 
 
 # ==========================================
-# 2. LÓGICA DE INFERENCIA Y CONSULTA EN GRAFO
+# 2. LÓGICA DE INFERENCIA DE VISIÓN
 # ==========================================
 def run_inference(model, PIL_image):
     results = model.predict(source=PIL_image, conf=0.25, verbose=False)
@@ -209,22 +202,20 @@ def run_inference(model, PIL_image):
 
 
 def get_assembly_sequence_from_neo4j(graph, detected_classes):
-    # Consulta corregida sin variables introducidas dentro de expresiones de patrón en WHERE
     query = """
-    MATCH (target:Assembly)
-    OPTIONAL MATCH (target)-[:REQUIRES]->(req)
-    WHERE req.id IN $classes OR req.name IN $classes OR target.id IN $classes OR target.name IN $classes
+    MATCH (target:Assembly)-[:REQUIRES]->(req)
+    WHERE req.id IN $classes OR req.name IN $classes
     
-    OPTIONAL MATCH (target)-[:REQUIRES]->(all_req)
+    MATCH (target)-[:REQUIRES]->(all_req)
     OPTIONAL MATCH (target)-[:NEXT_STEP]->(next_step)
     
     WITH target, 
+         collect(DISTINCT req.id) AS componentes_presentes,
          collect(DISTINCT all_req.id) AS componentes_totales,
-         [x IN collect(DISTINCT all_req.id) WHERE x IN $classes] AS componentes_presentes,
          next_step.id AS siguiente_paso
          
     WITH target, componentes_presentes, componentes_totales, siguiente_paso,
-         (size(componentes_totales) = 0 OR size(componentes_presentes) = size(componentes_totales)) AS listo
+         (size(componentes_presentes) = size(componentes_totales)) AS listo
          
     RETURN 
         target.id AS EnsambleObjetivo,
@@ -244,21 +235,16 @@ def get_assembly_sequence_from_neo4j(graph, detected_classes):
     if results:
         print(json.dumps(results, indent=2, ensure_ascii=False))
     else:
-        print(
-            "❌ No se encontraron coincidencias en Neo4j para:",
-            detected_classes,
-        )
+        print("❌ No se encontraron coincidencias en Neo4j para:", detected_classes)
     print("=" * 60 + "\n")
 
     return results
 
 
 # ==========================================
-# 3. LÓGICA DE BÚSQUEDA Y ANALISIS CON LLM
+# 3. LÓGICA DE BÚSQUEDA EN NEO4J & LLM ESTRUCTURADO
 # ==========================================
-def analyze_assembly_with_graph(
-    detected_classes, graph, llm, user_instructions=""
-):
+def analyze_assembly_with_graph(detected_classes, graph, llm, user_instructions=""):
     if not detected_classes:
         return None
 
@@ -283,11 +269,11 @@ Evaluación previa del Grafo de Conocimiento (Neo4j):
 {graph_context}
 
 Reglas estrictas para generar la respuesta:
-1. Analiza la lista 'graph_context' y FILTRA únicamente los objetos donde 'ListoParaEnsamblar' sea TRUE.
+1. Analiza la lista 'graph_context' y FILTRA únicamente los objetos donde 'ListoParaEnsamblar' sea TRUE. Ignora cualquier objeto donde sea FALSE.
 2. 'ensambles_posibles': Debe contener únicamente las claves del 'EnsambleObjetivo' indicado en el JSON de Neo4j si 'ListoParaEnsamblar' es true (ejemplo estricto: ['assembly_3']).
-3. 'etapa_actual': Debe ser ÚNICAMENTE el identificador del 'EnsambleObjetivo' (ejemplo estricto: 'assembly_3'). NO agregues texto descriptivo adicional.
+3. 'etapa_actual': Debe ser ÚNICAMENTE el identificador del 'EnsambleObjetivo' (ejemplo estricto: 'assembly_3'). NO agregues texto como "construcción exitosa...".
 4. 'piezas_faltantes': Usa exactamente la lista 'ComponentesFaltantes' de Neo4j para el ensamble seleccionado.
-5. 'resumen_tecnico': Explica en español cómo la combinación de las piezas detectadas permite formar el ensamble objetivo y cuál es el siguiente paso.
+5. 'resumen_tecnico': Explica cómo la combinación de las piezas detectadas permite formar el ensamble objetivo y qué paso sigue.
 """
 
     prompt_template = PromptTemplate(
@@ -323,6 +309,7 @@ def render_survey_view():
     ollama_url = st.secrets.get("OLLAMA_BASE_URL", "").strip()
 
     with st.form("encuesta_satisfaccion"):
+        # DATOS GENERALES DEL PARTICIPANTE
         st.subheader("Información del Participante")
         nombre_participante = st.text_input(
             "Nombre completo o Identificador del participante:",
@@ -332,9 +319,7 @@ def render_survey_view():
         st.divider()
 
         # SECCIÓN 1
-        st.subheader(
-            "Sección 1: Carga Mental Percibida (NASA-TLX Simplificado)"
-        )
+        st.subheader("Sección 1: Carga Mental Percibida (NASA-TLX Simplificado)")
         st.caption(
             "Escala de respuesta: 1 (Muy bajo / Muy fácil) a 5 (Muy alto / Muy difícil)"
         )
@@ -361,9 +346,7 @@ def render_survey_view():
         st.divider()
 
         # SECCIÓN 2
-        st.subheader(
-            "Sección 2: Usabilidad y Satisfacción con la Guía (SUS Adaptado)"
-        )
+        st.subheader("Sección 2: Usabilidad y Satisfacción con la Guía (SUS Adaptado)")
         st.caption(
             "Escala de respuesta: 1 (Totalmente en desacuerdo) a 5 (Totalmente de acuerdo)"
         )
@@ -420,9 +403,7 @@ def render_survey_view():
                     "participante_id": st.session_state.get(
                         "participante_id", "P_DESCONOCIDO"
                     ),
-                    "grupo_asignado": st.session_state.get(
-                        "grupo", "SIN_GRUPO"
-                    ),
+                    "grupo_asignado": st.session_state.get("grupo", "SIN_GRUPO"),
                 },
                 "nasa_tlx": {
                     "exigencia_mental": q1,
@@ -491,9 +472,7 @@ def main():
         return
 
     st.title("🛠️ Asistente Inteligente de Ensamble")
-    st.caption(
-        "Captura o sube una imagen para obtener la recomendación de ensamble."
-    )
+    st.caption("Captura o sube una imagen para obtener la recomendación de ensamble.")
 
     source_type = st.radio(
         "Selecciona el método de entrada:",
@@ -503,6 +482,7 @@ def main():
 
     uploaded_file = None
     camera_file = None
+
     key_suffix = st.session_state["widget_key_id"]
 
     if source_type == "📸 Usar Cámara":
@@ -524,13 +504,12 @@ def main():
     elif uploaded_file is not None:
         current_file_id = f"file_{uploaded_file.name}_{key_suffix}"
 
+    # Procesamiento
     if (
         active_image_source is not None
         and current_file_id != st.session_state["last_processed_file"]
     ):
-        with st.spinner(
-            "Analizando piezas y consultando el proceso de ensamble..."
-        ):
+        with st.spinner("Analizando piezas y consultando el proceso de ensamble..."):
             model = load_yolo()
             graph = load_neo4j()
             llm = load_ollama()
@@ -549,15 +528,11 @@ def main():
                 if conf >= required_thresh:
                     valid_detections.append(d)
 
-            valid_classes = list(
-                set([d["class_name"] for d in valid_detections])
-            )
+            valid_classes = list(set([d["class_name"] for d in valid_detections]))
 
             analysis = None
             if valid_classes:
-                analysis = analyze_assembly_with_graph(
-                    valid_classes, graph, llm
-                )
+                analysis = analyze_assembly_with_graph(valid_classes, graph, llm)
 
             st.session_state["last_processed_file"] = current_file_id
             st.session_state["analysis_data"] = {
@@ -578,27 +553,28 @@ def main():
                 else analysis.etapa_actual
             )
 
-            # Nombre formateado en español (ej: "Ensamble 7")
-            nombre_ensamble_es = format_assembly_name(target_raw)
+            # Extraer ID y verificar si corresponde a Ensamble 7
+            extracted_target_id = extract_assembly_id(target_raw)
+            extracted_stage_id = extract_assembly_id(analysis.etapa_actual)
 
-            # Verificar si se ha identificado el ensamble final (assembly_7)
-            is_final_assembly = extract_assembly_id(target_raw) == "assembly_7"
+            is_final_assembly = (
+                extracted_target_id == "assembly_7"
+                or extracted_stage_id == "assembly_7"
+                or "assembly_7" in valid_classes
+            )
 
-            # CASO A: Ensamble Válido / Listo
+            display_target = get_assembly_display_name(target_raw)
+            display_stage = get_assembly_display_name(analysis.etapa_actual)
+
+            # CASO A: Ensamble Válido
             if analysis.es_ensamble_valido and not analysis.piezas_faltantes:
-                st.success(f"✅ **Siguiente paso listo:** `{nombre_ensamble_es}`")
-                st.markdown(
-                    f"**Instrucción del Proceso:**\n{analysis.resumen_tecnico}"
-                )
+                st.success(f"✅ **Siguiente Ensamble Listo:** `{display_stage}`")
+                st.markdown(f"**Instrucción del Proceso:**\n{analysis.resumen_tecnico}")
 
                 st.subheader("🎬 Tutorial de Ensamble")
-                render_assembly_gif(
-                    target_raw, caption=f"Paso a paso: {nombre_ensamble_es}"
-                )
+                render_assembly_gif(target_raw, caption=f"Paso a paso: {display_target}")
 
                 st.divider()
-
-                # Se activa la encuesta SOLO cuando el ensamble identificado sea assembly_7
                 if is_final_assembly:
                     if st.button(
                         "Finalizar Ensamble e Ir a Encuesta ➔", type="primary"
@@ -616,7 +592,7 @@ def main():
                 if analysis.piezas_faltantes:
                     st.warning("**Piezas faltantes para continuar:**")
                     for p in analysis.piezas_faltantes:
-                        st.write(f"- 🔴 {format_assembly_name(p)}")
+                        st.write(f"- 🔴 {get_assembly_display_name(p)}")
 
                 st.info(f"**Detalle del estado:**\n{analysis.resumen_tecnico}")
 
