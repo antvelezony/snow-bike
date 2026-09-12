@@ -1,18 +1,17 @@
+from datetime import datetime
 import json
-import re
 from pathlib import Path
+import re
 from typing import List, Optional
 from PIL import Image
 from pydantic import BaseModel, Field
+import requests
 import streamlit as st
 from ultralytics import YOLO
 
 from langchain_core.prompts import PromptTemplate
 from langchain_neo4j import Neo4jGraph
 from langchain_ollama import ChatOllama
-
-from datetime import datetime
-import requests
 
 # ==========================================
 # RUTA DE GIFS Y CONFIGURACIÓN DE UMBRALES
@@ -77,7 +76,9 @@ class AnalisisEnsambleSchema(BaseModel):
 # ==========================================
 # 1. CONFIGURACIÓN DE PÁGINA Y RECURSOS
 # ==========================================
-st.set_page_config(page_title="Asistente de Ensamble Snow Bike", layout="centered")
+st.set_page_config(
+    page_title="Asistente de Ensamble Snow Bike", layout="centered"
+)
 
 
 @st.cache_resource
@@ -93,7 +94,9 @@ def load_neo4j():
     database = st.secrets.get("NEO4J_DATABASE", "").strip()
 
     if not url or not password:
-        st.error("⚠️ Faltan las credenciales de Neo4j en los Secrets de Streamlit.")
+        st.error(
+            "⚠️ Faltan las credenciales de Neo4j en los Secrets de Streamlit."
+        )
         st.stop()
 
     return Neo4jGraph(
@@ -124,7 +127,7 @@ def load_ollama():
 
 
 # ==========================================
-# HELPERS PARA MANEJO DE GIFS Y NOMBRES
+# HELPERS PARA MANEJO DE GIFS Y FORMATO
 # ==========================================
 def extract_assembly_id(text: str) -> Optional[str]:
     """Extrae el identificador tipo 'assembly_X' de cualquier texto retornado."""
@@ -135,13 +138,16 @@ def extract_assembly_id(text: str) -> Optional[str]:
         return match.group(1)
     return None
 
+
 def format_assembly_name(text: str) -> str:
-    """Convierte 'assembly_1' en 'Ensamble 1' para mostrar en la interfaz."""
+    """Convierte cadenas como 'assembly_3' a 'Ensamble 3' para mostrar en la UI."""
     if not text:
         return ""
-    # Reemplaza 'assembly_' por 'Ensamble ' y capitaliza
-    name = text.lower().replace("assembly_", "Ensamble ")
-    return name.capitalize()
+    assembly_id = extract_assembly_id(text)
+    if assembly_id:
+        num = assembly_id.split("_")[-1]
+        return f"Ensamble {num}"
+    return text.replace("_", " ").capitalize()
 
 
 def render_assembly_gif(raw_text: str, caption: str = ""):
@@ -153,13 +159,15 @@ def render_assembly_gif(raw_text: str, caption: str = ""):
         if gif_path.exists():
             st.image(str(gif_path), caption=caption, use_container_width=True)
         else:
-            st.info(f"ℹ️ No se encontró la guía animada para: `{format_assembly_name(assembly_id)}`")
+            st.info(
+                f"ℹ️ No se encontró la guía animada para: `{format_assembly_name(assembly_id)}`"
+            )
     else:
-        st.info(f"ℹ️ No se pudo extraer una clave válida de ensamble.")
+        st.info("ℹ️ No se pudo extraer una clave válida de ensamble.")
 
 
 def resetear_proceso():
-    """Limpia la sesión e incrementa el contador de clave para forzar el reseteo del widget de captura."""
+    """Limpia la sesión e incrementa el contador para forzar reseteo del widget."""
     current_key_id = st.session_state.get("widget_key_id", 0)
     st.session_state.clear()
     st.session_state["widget_key_id"] = current_key_id + 1
@@ -167,7 +175,7 @@ def resetear_proceso():
 
 
 # ==========================================
-# 2. LÓGICA DE INFERENCIA DE VISIÓN
+# 2. LÓGICA DE INFERENCIA Y CONSULTA EN GRAFO
 # ==========================================
 def run_inference(model, PIL_image):
     results = model.predict(source=PIL_image, conf=0.25, verbose=False)
@@ -201,20 +209,23 @@ def run_inference(model, PIL_image):
 
 
 def get_assembly_sequence_from_neo4j(graph, detected_classes):
+    # Consulta ajustada para contemplar tanto requerimientos directos como ensambles finales (ej. assembly_7)
     query = """
-    MATCH (target:Assembly)-[:REQUIRES]->(req)
-    WHERE req.id IN $classes OR req.name IN $classes
+    MATCH (target:Assembly)
+    WHERE (target)-[:REQUIRES]->(req) AND (req.id IN $classes OR req.name IN $classes)
+       OR target.id IN $classes
+       OR target.name IN $classes
     
-    MATCH (target)-[:REQUIRES]->(all_req)
+    OPTIONAL MATCH (target)-[:REQUIRES]->(all_req)
     OPTIONAL MATCH (target)-[:NEXT_STEP]->(next_step)
     
     WITH target, 
-         collect(DISTINCT req.id) AS componentes_presentes,
          collect(DISTINCT all_req.id) AS componentes_totales,
+         [x IN collect(DISTINCT all_req.id) WHERE x IN $classes] AS componentes_presentes,
          next_step.id AS siguiente_paso
          
     WITH target, componentes_presentes, componentes_totales, siguiente_paso,
-         (size(componentes_presentes) = size(componentes_totales)) AS listo
+         (size(componentes_totales) = 0 OR size(componentes_presentes) = size(componentes_totales)) AS listo
          
     RETURN 
         target.id AS EnsambleObjetivo,
@@ -228,13 +239,27 @@ def get_assembly_sequence_from_neo4j(graph, detected_classes):
     """
     results = graph.query(query, params={"classes": detected_classes})
 
+    print("\n" + "=" * 60)
+    print("🔍 [LOG NEO4J] SECUENCIA Y RELACIONES EXTRAÍDAS DEL GRAFO")
+    print("=" * 60)
+    if results:
+        print(json.dumps(results, indent=2, ensure_ascii=False))
+    else:
+        print(
+            "❌ No se encontraron coincidencias en Neo4j para:",
+            detected_classes,
+        )
+    print("=" * 60 + "\n")
+
     return results
 
 
 # ==========================================
-# 3. LÓGICA DE BÚSQUEDA EN NEO4J & LLM ESTRUCTURADO
+# 3. LÓGICA DE BÚSQUEDA Y ANALISIS CON LLM
 # ==========================================
-def analyze_assembly_with_graph(detected_classes, graph, llm, user_instructions=""):
+def analyze_assembly_with_graph(
+    detected_classes, graph, llm, user_instructions=""
+):
     if not detected_classes:
         return None
 
@@ -259,11 +284,11 @@ Evaluación previa del Grafo de Conocimiento (Neo4j):
 {graph_context}
 
 Reglas estrictas para generar la respuesta:
-1. Analiza la lista 'graph_context' y FILTRA únicamente los objetos donde 'ListoParaEnsamblar' sea TRUE. Ignora cualquier objeto donde sea FALSE.
+1. Analiza la lista 'graph_context' y FILTRA únicamente los objetos donde 'ListoParaEnsamblar' sea TRUE.
 2. 'ensambles_posibles': Debe contener únicamente las claves del 'EnsambleObjetivo' indicado en el JSON de Neo4j si 'ListoParaEnsamblar' es true (ejemplo estricto: ['assembly_3']).
-3. 'etapa_actual': Debe ser ÚNICAMENTE el identificador del 'EnsambleObjetivo' (ejemplo estricto: 'assembly_3'). NO agregues texto como "construcción exitosa...".
+3. 'etapa_actual': Debe ser ÚNICAMENTE el identificador del 'EnsambleObjetivo' (ejemplo estricto: 'assembly_3'). NO agregues texto descriptivo adicional.
 4. 'piezas_faltantes': Usa exactamente la lista 'ComponentesFaltantes' de Neo4j para el ensamble seleccionado.
-5. 'resumen_tecnico': Explica cómo la combinación de las piezas detectadas permite formar el ensamble objetivo y qué paso sigue.
+5. 'resumen_tecnico': Explica en español cómo la combinación de las piezas detectadas permite formar el ensamble objetivo y cuál es el siguiente paso.
 """
 
     prompt_template = PromptTemplate(
@@ -291,7 +316,7 @@ Reglas estrictas para generar la respuesta:
 def render_survey_view():
     st.balloons()
     st.title("📋 Encuesta de Evaluación del Proceso")
-    st.success("🎉 **¡Ensamble final completado con éxito!**")
+    st.success("🎉 **¡Ensamble final (Ensamble 7) completado con éxito!**")
     st.markdown(
         "Por favor, completa la siguiente encuesta para registrar los datos del experimento."
     )
@@ -307,53 +332,142 @@ def render_survey_view():
 
         st.divider()
 
-        st.subheader("Sección 1: Carga Mental Percibida (NASA-TLX Simplificado)")
-        st.caption("Escala de respuesta: 1 (Muy bajo / Muy fácil) a 5 (Muy alto / Muy difícil)")
+        # SECCIÓN 1
+        st.subheader(
+            "Sección 1: Carga Mental Percibida (NASA-TLX Simplificado)"
+        )
+        st.caption(
+            "Escala de respuesta: 1 (Muy bajo / Muy fácil) a 5 (Muy alto / Muy difícil)"
+        )
 
-        q1 = st.slider("1. Exigencia Mental...", 1, 5, 3)
-        q2 = st.slider("2. Frustración...", 1, 5, 3)
-        q3 = st.slider("3. Esfuerzo Físico...", 1, 5, 3)
+        q1 = st.slider(
+            "1. Exigencia Mental: ¿Qué tanto esfuerzo mental o de concentración requeriste para entender cómo ensamblar la figura?",
+            1,
+            5,
+            3,
+        )
+        q2 = st.slider(
+            "2. Frustración: ¿Qué tan frustrado, presionado o molesto te sentiste durante el proceso de ensamble?",
+            1,
+            5,
+            3,
+        )
+        q3 = st.slider(
+            "3. Esfuerzo Físico/Operativo: ¿Qué tan incómodo o pesado fue alternar entre ensamblar las piezas y consultar la guía (app/imagen)?",
+            1,
+            5,
+            3,
+        )
 
         st.divider()
 
-        st.subheader("Sección 2: Usabilidad y Satisfacción")
-        q4 = st.radio("4. Claridad...", [1, 2, 3, 4, 5], horizontal=True, index=2)
-        q5 = st.radio("5. Confianza...", [1, 2, 3, 4, 5], horizontal=True, index=2)
-        q6 = st.radio("6. Ritmo...", [1, 2, 3, 4, 5], horizontal=True, index=2)
-        q7 = st.radio("7. Preferencia...", [1, 2, 3, 4, 5], horizontal=True, index=2)
+        # SECCIÓN 2
+        st.subheader(
+            "Sección 2: Usabilidad y Satisfacción con la Guía (SUS Adaptado)"
+        )
+        st.caption(
+            "Escala de respuesta: 1 (Totalmente en desacuerdo) a 5 (Totalmente de acuerdo)"
+        )
+
+        q4 = st.radio(
+            "4. Claridad de la Información: Las instrucciones proporcionadas por el método fueron claras y fáciles de entender en cada paso.",
+            [1, 2, 3, 4, 5],
+            horizontal=True,
+            index=2,
+        )
+        q5 = st.radio(
+            "5. Confianza: Me sentí seguro de que estaba colocando las piezas correctas sin miedo a equivocarme.",
+            [1, 2, 3, 4, 5],
+            horizontal=True,
+            index=2,
+        )
+        q6 = st.radio(
+            "6. Ritmo de Trabajo: La herramienta me permitió mantener un ritmo de trabajo fluido sin interrupciones innecesarias.",
+            [1, 2, 3, 4, 5],
+            horizontal=True,
+            index=2,
+        )
+        q7 = st.radio(
+            "7. Preferencia: Preferiría utilizar este método antes que un manual en texto o armado por intuición.",
+            [1, 2, 3, 4, 5],
+            horizontal=True,
+            index=2,
+        )
 
         st.divider()
 
-        st.subheader("Sección 3: Retroalimentación")
-        q8 = st.text_area("Puntos de Fricción...")
-        q9 = st.text_area("Fricción Operativa (Grupo A)...")
-        q10 = st.text_area("Sugerencias...")
+        # SECCIÓN 3
+        st.subheader("Sección 3: Retroalimentación Cualitativa (Abierta)")
 
-        submitted = st.form_submit_button("Guardar y Finalizar Experimento", type="primary")
+        q8 = st.text_area(
+            "Puntos de Fricción: ¿En cuál de los 7 pasos sentiste mayor duda o retraso, y por qué?"
+        )
+        q9 = st.text_area(
+            "Fricción Operativa (Específica para Grupo A - App): ¿Tomar la foto en cada paso facilitó el proceso o sentiste que interrumpía la fluidez del armado?"
+        )
+        q10 = st.text_area(
+            "Sugerencias de Mejora: ¿Qué cambio le harías al sistema para que el ensamble fuera más rápido o intuitivo?"
+        )
+
+        submitted = st.form_submit_button(
+            "Guardar y Finalizar Experimento", type="primary"
+        )
 
         if submitted:
             payload = {
                 "metadata": {
                     "timestamp": datetime.now().isoformat(),
                     "nombre_participante": nombre_participante.strip(),
-                    "participante_id": st.session_state.get("participante_id", "P_DESCONOCIDO"),
-                    "grupo_asignado": st.session_state.get("grupo", "SIN_GRUPO"),
+                    "participante_id": st.session_state.get(
+                        "participante_id", "P_DESCONOCIDO"
+                    ),
+                    "grupo_asignado": st.session_state.get(
+                        "grupo", "SIN_GRUPO"
+                    ),
                 },
-                "respuestas": { "nasa": [q1, q2, q3], "sus": [q4, q5, q6, q7], "feedback": [q8, q9, q10] }
+                "nasa_tlx": {
+                    "exigencia_mental": q1,
+                    "frustracion": q2,
+                    "esfuerzo_fisico": q3,
+                },
+                "sus_adaptado": {
+                    "claridad_informacion": q4,
+                    "confianza": q5,
+                    "ritmo_trabajo": q6,
+                    "preferencia": q7,
+                },
+                "cualitativo": {
+                    "puntos_friccion": q8,
+                    "friccion_operativa": q9,
+                    "sugerencias_mejora": q10,
+                },
             }
 
             endpoint = f"{ollama_url.rstrip('/')}/guardar_encuesta"
-            headers = {"Content-Type": "application/json", "ngrok-skip-browser-warning": "true"}
+            headers = {
+                "Content-Type": "application/json",
+                "ngrok-skip-browser-warning": "true",
+            }
 
             try:
-                response = requests.post(endpoint, json=payload, headers=headers, timeout=10)
+                response = requests.post(
+                    endpoint, json=payload, headers=headers, timeout=10
+                )
+
                 if response.status_code == 200:
                     st.session_state["encuesta_completada"] = True
-                    st.success("✅ Datos guardados localmente.")
+                    st.success(
+                        "✅ Respuestas guardadas correctamente en el servidor local. ¡Gracias por tu participación!"
+                    )
                 else:
-                    st.error(f"⚠️ Error {response.status_code}")
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
+                    st.error(
+                        f"⚠️ Error al guardar en el servidor local (Código {response.status_code})."
+                    )
+
+            except requests.exceptions.RequestException as e:
+                st.error(
+                    f"❌ No se pudo conectar con el servidor local a través de Ngrok: {e}"
+                )
 
     if st.session_state.get("encuesta_completada"):
         if st.button("🔄 Iniciar Nuevo Experimento"):
@@ -378,82 +492,146 @@ def main():
         return
 
     st.title("🛠️ Asistente Inteligente de Ensamble")
-    
-    source_type = st.radio("Selecciona el método de entrada:", ["📸 Usar Cámara", "📁 Subir Imagen"], horizontal=True)
+    st.caption(
+        "Captura o sube una imagen para obtener la recomendación de ensamble."
+    )
+
+    source_type = st.radio(
+        "Selecciona el método de entrada:",
+        ["📸 Usar Cámara", "📁 Subir Imagen"],
+        horizontal=True,
+    )
 
     uploaded_file = None
     camera_file = None
     key_suffix = st.session_state["widget_key_id"]
 
     if source_type == "📸 Usar Cámara":
-        camera_file = st.camera_input("Toma la foto", key=f"cam_{key_suffix}")
+        camera_file = st.camera_input(
+            "Toma la foto de las piezas actuales", key=f"cam_{key_suffix}"
+        )
     else:
-        uploaded_file = st.file_uploader("Sube imagen", type=["jpg", "png", "webp"], key=f"file_{key_suffix}")
+        uploaded_file = st.file_uploader(
+            "Selecciona un archivo de imagen",
+            type=["jpg", "jpeg", "png", "bmp", "webp"],
+            key=f"file_{key_suffix}",
+        )
 
     active_image_source = camera_file if camera_file is not None else uploaded_file
-    current_file_id = f"{active_image_source.name}_{key_suffix}" if active_image_source else None
 
-    if active_image_source and current_file_id != st.session_state["last_processed_file"]:
-        with st.spinner("Analizando..."):
-            model, graph, llm = load_yolo(), load_neo4j(), load_ollama()
+    current_file_id = None
+    if camera_file is not None:
+        current_file_id = f"camera_{camera_file.file_id}_{key_suffix}"
+    elif uploaded_file is not None:
+        current_file_id = f"file_{uploaded_file.name}_{key_suffix}"
+
+    if (
+        active_image_source is not None
+        and current_file_id != st.session_state["last_processed_file"]
+    ):
+        with st.spinner(
+            "Analizando piezas y consultando el proceso de ensamble..."
+        ):
+            model = load_yolo()
+            graph = load_neo4j()
+            llm = load_ollama()
+
             image = Image.open(active_image_source)
             output_json, annotated_image = run_inference(model, image)
-            
-            valid_classes = []
-            for d in output_json.get("detections", []):
-                if d.get("confidence", 0) >= CLASS_THRESHOLDS.get(d.get("class_name"), 0.5):
-                    valid_classes.append(d["class_name"])
-            
-            analysis = analyze_assembly_with_graph(list(set(valid_classes)), graph, llm) if valid_classes else None
-            st.session_state["last_processed_file"] = current_file_id
-            st.session_state["analysis_data"] = {"analysis": analysis}
 
+            raw_detections = output_json.get("detections", [])
+            valid_detections = []
+
+            for d in raw_detections:
+                cls_name = d.get("class_name")
+                conf = d.get("confidence", 0.0)
+                required_thresh = CLASS_THRESHOLDS.get(cls_name, 0.50)
+
+                if conf >= required_thresh:
+                    valid_detections.append(d)
+
+            valid_classes = list(
+                set([d["class_name"] for d in valid_detections])
+            )
+
+            analysis = None
+            if valid_classes:
+                analysis = analyze_assembly_with_graph(
+                    valid_classes, graph, llm
+                )
+
+            st.session_state["last_processed_file"] = current_file_id
+            st.session_state["analysis_data"] = {
+                "valid_classes": valid_classes,
+                "analysis": analysis,
+            }
+
+    # Mostrar Resultados
     data = st.session_state.get("analysis_data")
     if data:
         st.divider()
         analysis: Optional[AnalisisEnsambleSchema] = data.get("analysis")
 
         if analysis:
-            target_id = extract_assembly_id(analysis.etapa_actual)
-            # Traducimos el ID a un nombre amigable (Ensamble X)
-            target_display_name = format_assembly_name(target_id)
-            
-            # Condición de éxito: Listo para ensamblar y sin piezas faltantes
-            is_ready = analysis.es_ensamble_valido and not analysis.piezas_faltantes
-            # Verificamos si es específicamente el paso 7
-            is_final_step = target_id == "assembly_7"
+            target_raw = (
+                analysis.ensambles_posibles[0]
+                if analysis.ensambles_posibles
+                else analysis.etapa_actual
+            )
 
-            if is_ready:
-                st.success(f"✅ **Siguiente paso listo:** `{target_display_name}`")
-                st.markdown(f"**Instrucción:**\n{analysis.resumen_tecnico}")
-                st.subheader("🎬 Tutorial animado")
-                render_assembly_gif(target_id, caption=f"Guía para {target_display_name}")
+            # Nombre formateado en español (ej: "Ensamble 7")
+            nombre_ensamble_es = format_assembly_name(target_raw)
+
+            # Verificar si se ha identificado el ensamble final (assembly_7)
+            is_final_assembly = extract_assembly_id(target_raw) == "assembly_7"
+
+            # CASO A: Ensamble Válido / Listo
+            if analysis.es_ensamble_valido and not analysis.piezas_faltantes:
+                st.success(f"✅ **Siguiente paso listo:** `{nombre_ensamble_es}`")
+                st.markdown(
+                    f"**Instrucción del Proceso:**\n{analysis.resumen_tecnico}"
+                )
+
+                st.subheader("🎬 Tutorial de Ensamble")
+                render_assembly_gif(
+                    target_raw, caption=f"Paso a paso: {nombre_ensamble_es}"
+                )
 
                 st.divider()
-                
-                # REQUERIMIENTO 2: El botón de encuesta SOLO aparece si es el Ensamble 7 listo
-                if is_final_step:
-                    if st.button("Finalizar proceso e ir a Encuesta ➔", type="primary"):
+
+                # Se activa la encuesta SOLO cuando el ensamble identificado sea assembly_7
+                if is_final_assembly:
+                    if st.button(
+                        "Finalizar Ensamble e Ir a Encuesta ➔", type="primary"
+                    ):
                         st.session_state["mostrar_encuesta"] = True
                         st.rerun()
                 else:
-                    if st.button("Continuar al siguiente paso ➔", type="primary"):
+                    if st.button("Continuar ➔", type="primary"):
                         resetear_proceso()
 
+            # CASO B: Ensamble Incompleto / Faltan Piezas
             else:
-                st.error(f"⚠️ **Aún no puedes completar el `{target_display_name}`**")
+                st.error("⚠️ **No es posible realizar un nuevo ensamble aún.**")
+
                 if analysis.piezas_faltantes:
-                    st.warning("**Piezas faltantes:**")
+                    st.warning("**Piezas faltantes para continuar:**")
                     for p in analysis.piezas_faltantes:
-                        st.write(f"- 🔴 {p}")
-                st.info(f"**Estado actual:**\n{analysis.resumen_tecnico}")
+                        st.write(f"- 🔴 {format_assembly_name(p)}")
+
+                st.info(f"**Detalle del estado:**\n{analysis.resumen_tecnico}")
+
                 st.divider()
-                if st.button("🔄 Reintentar captura", type="secondary"):
+                if st.button("🔄 Volver a intentar", type="secondary"):
                     resetear_proceso()
         else:
-            st.warning("⚠️ No se detectaron piezas suficientes.")
-            if st.button("🔄 Reintentar", type="secondary"):
+            st.warning(
+                "⚠️ No se identificaron piezas suficientes o válidas para sugerir un ensamble."
+            )
+            st.divider()
+            if st.button("🔄 Volver a intentar", type="secondary"):
                 resetear_proceso()
+
 
 if __name__ == "__main__":
     main()
