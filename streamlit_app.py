@@ -202,29 +202,21 @@ def run_inference(model, PIL_image):
 
 
 def get_assembly_sequence_from_neo4j(graph, detected_classes):
-    print("\n" + "=" * 60)
-    print("📌 [YOLO DETECTED CLASSES]:", detected_classes)
-    print("=" * 60)
-
-    # Consulta Cypher flexible: busca si la clase detectada es un componente O el ensamble mismo
+    # Consulta Cypher Original Restaurada
     query = """
-    MATCH (target:Assembly)
-    WHERE target.id IN $classes 
-       OR EXISTS {
-            MATCH (target)-[:REQUIRES]->(req)
-            WHERE req.id IN $classes OR req.name IN $classes
-       }
+    MATCH (target:Assembly)-[:REQUIRES]->(req)
+    WHERE req.id IN $classes OR req.name IN $classes
     
-    OPTIONAL MATCH (target)-[:REQUIRES]->(all_req)
+    MATCH (target)-[:REQUIRES]->(all_req)
     OPTIONAL MATCH (target)-[:NEXT_STEP]->(next_step)
     
     WITH target, 
-         [r IN collect(DISTINCT all_req.id) WHERE r IN $classes] AS componentes_presentes,
+         collect(DISTINCT req.id) AS componentes_presentes,
          collect(DISTINCT all_req.id) AS componentes_totales,
          next_step.id AS siguiente_paso
          
     WITH target, componentes_presentes, componentes_totales, siguiente_paso,
-         (target.id IN $classes OR size(componentes_presentes) = size(componentes_totales)) AS listo
+         (size(componentes_presentes) = size(componentes_totales)) AS listo
          
     RETURN 
         target.id AS EnsambleObjetivo,
@@ -234,10 +226,11 @@ def get_assembly_sequence_from_neo4j(graph, detected_classes):
         [x IN componentes_totales WHERE NOT x IN $classes] AS ComponentesFaltantes,
         listo AS ListoParaEnsamblar,
         siguiente_paso AS SiguientePasoSiSeCompleta
-    ORDER BY ListoParaEnsamblar DESC, target.id DESC
+    ORDER BY ListoParaEnsamblar DESC, target.id ASC
     """
     results = graph.query(query, params={"classes": detected_classes})
 
+    print("\n" + "=" * 60)
     print("🔍 [LOG NEO4J] SECUENCIA Y RELACIONES EXTRAÍDAS DEL GRAFO")
     print("=" * 60)
     if results:
@@ -317,7 +310,6 @@ def render_survey_view():
     ollama_url = st.secrets.get("OLLAMA_BASE_URL", "").strip()
 
     with st.form("encuesta_satisfaccion"):
-        # DATOS GENERALES DEL PARTICIPANTE
         st.subheader("Información del Participante")
         nombre_participante = st.text_input(
             "Nombre completo o Identificador del participante:",
@@ -326,7 +318,6 @@ def render_survey_view():
 
         st.divider()
 
-        # SECCIÓN 1
         st.subheader("Sección 1: Carga Mental Percibida (NASA-TLX Simplificado)")
         st.caption(
             "Escala de respuesta: 1 (Muy bajo / Muy fácil) a 5 (Muy alto / Muy difícil)"
@@ -353,7 +344,6 @@ def render_survey_view():
 
         st.divider()
 
-        # SECCIÓN 2
         st.subheader("Sección 2: Usabilidad y Satisfacción con la Guía (SUS Adaptado)")
         st.caption(
             "Escala de respuesta: 1 (Totalmente en desacuerdo) a 5 (Totalmente de acuerdo)"
@@ -386,7 +376,6 @@ def render_survey_view():
 
         st.divider()
 
-        # SECCIÓN 3
         st.subheader("Sección 3: Retroalimentación Cualitativa (Abierta)")
 
         q8 = st.text_area(
@@ -539,7 +528,8 @@ def main():
             valid_classes = list(set([d["class_name"] for d in valid_detections]))
 
             analysis = None
-            if valid_classes:
+            # SI NO ES ASSEMBLY_7, CONSULTA A NEO4J Y OLLAMA NORMALMENTE
+            if valid_classes and "assembly_7" not in valid_classes:
                 analysis = analyze_assembly_with_graph(valid_classes, graph, llm)
 
             st.session_state["last_processed_file"] = current_file_id
@@ -555,7 +545,7 @@ def main():
         analysis: Optional[AnalisisEnsambleSchema] = data.get("analysis")
         valid_classes: List[str] = data.get("valid_classes", [])
 
-        # CASO VÍAS DIRECTAS: Si la imagen detectada por YOLO contiene "assembly_7"
+        # CASO 1: Si la imagen capturada es el Ensamble 7 Terminado
         if "assembly_7" in valid_classes:
             st.success("🎉 **¡Ensamble Final (Ensamble 7) Completado Exitosamente!**")
             st.markdown("Has completado la totalidad de la estructura de la Snow Bike.")
@@ -564,6 +554,7 @@ def main():
                 st.session_state["mostrar_encuesta"] = True
                 st.rerun()
 
+        # CASO 2: Para Ensambles del 1 al 6 procesados vía Neo4j / LLM
         elif analysis:
             target_raw = (
                 analysis.ensambles_posibles[0]
@@ -574,7 +565,7 @@ def main():
             display_target = get_assembly_display_name(target_raw)
             display_stage = get_assembly_display_name(analysis.etapa_actual)
 
-            # CASO A: Ensamble Válido en progreso
+            # Ensamble Válido en progreso (incluyendo assembly_6 + seat)
             if analysis.es_ensamble_valido and not analysis.piezas_faltantes:
                 st.success(f"✅ **Siguiente Ensamble Listo:** `{display_stage}`")
                 st.markdown(f"**Instrucción del Proceso:**\n{analysis.resumen_tecnico}")
@@ -586,7 +577,7 @@ def main():
                 if st.button("Continuar ➔", type="primary"):
                     resetear_proceso()
 
-            # CASO B: Ensamble Incompleto / Faltan Piezas
+            # Ensamble Incompleto / Faltan Piezas
             else:
                 st.error("⚠️ **No es posible realizar un nuevo ensamble aún.**")
 
@@ -600,9 +591,11 @@ def main():
                 st.divider()
                 if st.button("🔄 Volver a intentar", type="secondary"):
                     resetear_proceso()
+
+        # CASO 3: Sin detecciones válidas
         else:
             st.warning(
-                f"⚠️ No se identificaron reglas en Neo4j para las piezas detectadas: `{valid_classes}`"
+                "⚠️ No se identificaron piezas suficientes o válidas para sugerir un ensamble."
             )
             st.divider()
             if st.button("🔄 Volver a intentar", type="secondary"):
